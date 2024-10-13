@@ -1,3 +1,6 @@
+venv/
+1_ood/
+
 # IDE
 .vscode
 
