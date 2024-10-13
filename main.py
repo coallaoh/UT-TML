@@ -471,10 +471,10 @@ def train_debiased_model():
         trainer.eval(eval_key="biased", epoch=epoch)
 
 if __name__ == "__main__":
-    # download_datasets()
-    # visualize_unbiased_data()
-    # visualize_biased_data()
-    # train_erm()
+    download_datasets()
+    visualize_unbiased_data()
+    visualize_biased_data()
+    train_erm()
     train_cbm()
     train_irm()
     train_diversify()
