@@ -91,7 +91,7 @@ class DSpritesDataset:
 class DSpritesDatasetMultiLabel(DSpritesDataset):
     def __init__(self, num_classes, split, dataset_size=None):
         super().__init__(split)
-        self._num_classes = num_classes
+        self.num_classes = num_classes
         self.idx_colored_dsprites_indices_and_labels = self._setup_labels(
             file_name=f"{config['CACHE_DIR']}/dsprites_{split}.pkl")
         random.shuffle(self.idx_colored_dsprites_indices_and_labels)
@@ -106,7 +106,7 @@ class DSpritesDatasetMultiLabel(DSpritesDataset):
         for cue_name in self.latent['names']:
             cue_id = self.latent['names_to_indices'][cue_name]
             values2labels[cue_name] = self._get_values2labels(
-                self._num_classes,
+                self.num_classes,
                 self.latent['sizes'][cue_id]
             )
         idx_colored_dsprites_indices_and_labels = []
@@ -219,22 +219,63 @@ class DiagonalOffDiagonalDataset(DSpritesDatasetMultiLabel):
     def __len__(self):
         return len(self.biased_idx_colored_dsprites_indices)
     
+class DomainGeneralizationDataset(DSpritesDatasetMultiLabel):
+    def __init__(
+        self,
+        dataset_size,
+        num_classes,
+        split,
+        bias_cue,
+        bias_cue_classes,
+    ):
+        super().__init__(num_classes=num_classes, split=split)
+        self.bias_cue = bias_cue
+        self.biased_idx_colored_dsprites_indices = self._setup_indices(dataset_size, bias_cue_classes)
+        random.shuffle(self.biased_idx_colored_dsprites_indices)
+
+    def _setup_indices(self, dataset_size, bias_cue_classes):
+        logging.info("Setting up indices for DomainGeneralizationDataset")
+        if any(class_value >= self.num_classes for class_value in bias_cue_classes):
+            raise ValueError("All bias_cue_classes values must be less than num_classes")
+        
+        bias_idx = self.latent['names'].index(self.bias_cue)
+
+        relevant_indices = [
+            idx for idx, (_, labels) in enumerate(self.idx_colored_dsprites_indices_and_labels)
+            if labels[bias_idx] in bias_cue_classes
+        ]
+
+        indices = random.sample(relevant_indices, dataset_size)
+
+        logging.info(f"Created {len(indices)} indices")
+        return indices
+    
+    def __getitem__(self, idx):
+        idx_idx_colored_dsprites_indices_and_labels = self.biased_idx_colored_dsprites_indices[idx]
+        return super().__getitem__(idx_idx_colored_dsprites_indices_and_labels)
+
+    def __len__(self):
+        return len(self.biased_idx_colored_dsprites_indices)
+
+
 def load_dataloader(
+    data_setting: str = "diagonal",
     split: str = "train",
     dataset_size: int = config["TRAIN_DATASET_SIZE"],
     bias_cue: str = None,
     task_cue: str = None,
-    off_diag_proportion: float = 0
+    off_diag_proportion: float = 0,
+    bias_cue_classes: list = None
 ) -> torch.utils.data.DataLoader:
     
-    if bias_cue is None or task_cue is None:
+    if data_setting == "unbiased":
         logging.info(f"Creating unbiased dsprites dataloader for split: {split}")
         dataset = DSpritesDatasetMultiLabel(
             num_classes=config["NUM_CLASSES"],
             split=split,
             dataset_size=dataset_size
         )
-    else:
+    elif data_setting == "diagonal":
         logging.info(f"Creating biased dsprites dataloader for split: {split}")
         dataset = DiagonalOffDiagonalDataset(
             dataset_size=dataset_size,
@@ -244,6 +285,16 @@ def load_dataloader(
             task_cue=task_cue,
             off_diag_proportion=off_diag_proportion,
         )
+    elif data_setting == "domain_generalization":
+        dataset = DomainGeneralizationDataset(
+            dataset_size=dataset_size,
+            num_classes=config["NUM_CLASSES"],
+            split=split,
+            bias_cue=bias_cue,
+            bias_cue_classes=bias_cue_classes,
+        )
+    else:
+        raise ValueError(f"Unknown data setting: {data_setting}")
 
     dataloader = torch.utils.data.DataLoader(
         dataset=dataset,
